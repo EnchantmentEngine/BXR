@@ -201,28 +201,33 @@ export default class Game {
     }
 
     async initXR(): Promise<void> {
-        // Create Default WebXR Experience for AR
-        try {
-            const xr = await this.scene.createDefaultXRExperienceAsync({
-                uiOptions: {
-                    sessionMode: "immersive-ar",
-                },
-                optionalFeatures: true
-            });
-            console.log("WebXR AR initialized");
-        } catch (error) {
-            console.log("WebXR AR not supported, falling back to desktop camera.");
+        // Check if WebXR AR is supported first
+        const isARSupported = await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-ar');
+        
+        if (isARSupported) {
+            try {
+                const xr = await this.scene.createDefaultXRExperienceAsync({
+                    uiOptions: {
+                        sessionMode: "immersive-ar",
+                    },
+                    optionalFeatures: true
+                });
+                console.log("WebXR AR initialized successfully");
+                return; // Exit early if WebXR initialized successfully
+            } catch (error) {
+                console.error("WebXR AR initialization failed:", error);
+            }
+        } else {
+            console.log("WebXR AR not supported on this device");
         }
 
-        // Fallback to standard camera if WebXR is not supported
-        if (!await BABYLON.WebXRSessionManager.IsSessionSupportedAsync('immersive-ar')) {
-            console.log("WebXR AR not supported, using desktop camera.");
-            const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, 1.0, 550, BABYLON.Vector3.Zero(), this.scene);
-            camera.setTarget(BABYLON.Vector3.Zero());
-            camera.attachControl(this.canvas, true);
-            this.camera = camera;
-            createSkyBox(this.scene); // Only add skybox in non-AR
-        }
+        // Fallback to standard camera if WebXR is not supported or failed
+        console.log("Using desktop camera fallback");
+        const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, 1.0, 550, BABYLON.Vector3.Zero(), this.scene);
+        camera.setTarget(BABYLON.Vector3.Zero());
+        camera.attachControl(this.canvas, true);
+        this.camera = camera;
+        createSkyBox(this.scene); // Only add skybox in non-AR
     }
 
     // WebRTC & Video Logic
@@ -258,7 +263,16 @@ export default class Game {
         // This prevents both sides from offering simultaneously.
         if (this.room.sessionId > remoteSessionId) {
             console.log(`Initiating call to ${remoteSessionId}`);
+            
+            // Handle negotiation with proper state management
+            let isNegotiating = false;
             pc.onnegotiationneeded = async () => {
+                if (isNegotiating) {
+                    console.log("Already negotiating, skipping...");
+                    return;
+                }
+                
+                isNegotiating = true;
                 try {
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
@@ -269,6 +283,8 @@ export default class Game {
                     });
                 } catch (err) {
                     console.error("Error creating offer:", err);
+                } finally {
+                    isNegotiating = false;
                 }
             };
         }
@@ -279,7 +295,10 @@ export default class Game {
             const { from, type, payload } = data;
             const pc = this.peers[from];
             
-            if (!pc) return; // Should have been created in onAdd
+            if (!pc) {
+                console.warn(`Received signal for unknown peer: ${from}`);
+                return;
+            }
 
             try {
                 if (type === "offer") {
@@ -307,7 +326,10 @@ export default class Game {
         video.muted = false; // Enable audio for voice chat
         video.playsInline = true;
         video.srcObject = stream;
-        video.play().catch(e => console.warn("Video play error (interaction needed):", e));
+        video.play().catch(e => {
+            console.warn("Video autoplay blocked. User interaction required to enable video/audio.", e);
+            console.info("Click anywhere on the page to enable video and audio playback.");
+        });
 
         // Create Video Texture
         const videoTexture = new BABYLON.VideoTexture(`videoTex-${sessionId}`, video, this.scene, true, false);

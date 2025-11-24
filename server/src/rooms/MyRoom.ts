@@ -19,6 +19,12 @@ export class MyRoom extends Room<MyRoomState> {
 
         // WebRTC Signaling
         this.onMessage("signal", (client, data: any) => {
+            // Validate input data
+            if (!data || typeof data.to !== 'string' || typeof data.type !== 'string' || !data.payload) {
+                console.error("Invalid signal data received from", client.sessionId);
+                return;
+            }
+            
             // data = { to: "targetSessionId", type: "offer"|"answer"|"candidate", payload: ... }
             // Iterate through clients and find the target
             this.clients.forEach((targetClient: Client) => {
