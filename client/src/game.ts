@@ -156,7 +156,7 @@ export default class Game {
         button.width = this.isMobile ? "80px" : "100px";
         button.height = this.isMobile ? "40px" : "50px";
         button.fontFamily = "Roboto";
-        button.fontSize = this.isMobile ? 12 : 16;
+        button.fontSize = this.isMobile ? "12px" : "16px";
         button.thickness = 0;
         button.color = "#f8f8f8";
         button.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;

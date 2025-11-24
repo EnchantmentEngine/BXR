@@ -112,7 +112,7 @@ export default class Menu {
         button.fontFamily = "Roboto";
         button.fontSize = this._isMobile ? "5%" : "6%";
         button.thickness = 0;
-        button.paddingTop = "10px"
+        button.paddingTop = "10px";
         button.color = "#c0c0c0";
         return button;
     }
