@@ -6,6 +6,9 @@ import Menu from "./menu";
 import { createSkyBox } from "./utils";
 
 const GROUND_SIZE = 500;
+const BOUNDARY_LIMIT = 245; // Position boundary limit
+const KEYBOARD_SPEED = 5; // Movement speed for keyboard controls
+const JOYSTICK_SPEED = 3; // Movement speed for joystick controls
 
 // WebRTC Configuration
 const RTC_CONFIG = {
@@ -282,22 +285,7 @@ export default class Game {
                 const pickInfo = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
                 if (pickInfo.hit && pickInfo.pickedMesh?.name === "plane") {
                     const targetPosition = pickInfo.pickedPoint.clone();
-
-                    // Position adjustments for the current play ground.
-                    targetPosition.y = -1;
-                    if (targetPosition.x > 245) targetPosition.x = 245;
-                    else if (targetPosition.x < -245) targetPosition.x = -245;
-                    if (targetPosition.z > 245) targetPosition.z = 245;
-                    else if (targetPosition.z < -245) targetPosition.z = -245;
-
-                    this.playerNextPosition[this.room.sessionId] = targetPosition;
-
-                    // Send position update to the server
-                    this.room.send("updatePosition", {
-                        x: targetPosition.x,
-                        y: targetPosition.y,
-                        z: targetPosition.z,
-                    });
+                    this.updatePlayerPosition(targetPosition);
                 }
             }
         };
@@ -329,7 +317,6 @@ export default class Game {
 
         // Movement processing in render loop
         this.scene.onBeforeRenderObservable.add(() => {
-            const speed = 5; // Movement speed
             let hasMovement = false;
 
             // Calculate movement direction
@@ -357,42 +344,14 @@ export default class Game {
                 const playerMesh = this.playerEntities[this.room.sessionId];
                 if (playerMesh) {
                     // Get camera direction for movement relative to camera
-                    let cameraDirection = BABYLON.Vector3.Zero();
-                    let cameraRight = BABYLON.Vector3.Zero();
-                    
-                    if (this.camera && this.camera instanceof BABYLON.ArcRotateCamera) {
-                        const arcCamera = this.camera as BABYLON.ArcRotateCamera;
-                        cameraDirection = arcCamera.target.subtract(arcCamera.position).normalize();
-                        cameraDirection.y = 0; // Keep movement horizontal
-                        cameraDirection.normalize();
-                        cameraRight = BABYLON.Vector3.Cross(cameraDirection, BABYLON.Vector3.Up());
-                    } else {
-                        // Default to world axes if camera is not available
-                        cameraDirection = new BABYLON.Vector3(0, 0, 1);
-                        cameraRight = new BABYLON.Vector3(1, 0, 0);
-                    }
+                    const { forward: cameraDirection, right: cameraRight } = this.getCameraDirectionVectors();
 
                     // Calculate new position
-                    const movement = cameraDirection.scale(forward * speed)
-                        .add(cameraRight.scale(right * speed));
+                    const movement = cameraDirection.scale(forward * KEYBOARD_SPEED)
+                        .add(cameraRight.scale(right * KEYBOARD_SPEED));
                     
                     const newPosition = playerMesh.position.add(movement);
-                    newPosition.y = -1;
-
-                    // Clamp to boundaries
-                    if (newPosition.x > 245) newPosition.x = 245;
-                    else if (newPosition.x < -245) newPosition.x = -245;
-                    if (newPosition.z > 245) newPosition.z = 245;
-                    else if (newPosition.z < -245) newPosition.z = -245;
-
-                    this.playerNextPosition[this.room.sessionId] = newPosition;
-
-                    // Send position update to server (throttled by render loop)
-                    this.room.send("updatePosition", {
-                        x: newPosition.x,
-                        y: newPosition.y,
-                        z: newPosition.z,
-                    });
+                    this.updatePlayerPosition(newPosition);
                 }
             }
         });
@@ -576,6 +535,49 @@ export default class Game {
         this.videoMeshes[sessionId] = plane;
     }
 
+    private getCameraDirectionVectors(): { forward: BABYLON.Vector3, right: BABYLON.Vector3 } {
+        let cameraDirection = BABYLON.Vector3.Zero();
+        let cameraRight = BABYLON.Vector3.Zero();
+        
+        if (this.camera && this.camera instanceof BABYLON.ArcRotateCamera) {
+            const arcCamera = this.camera as BABYLON.ArcRotateCamera;
+            cameraDirection = arcCamera.target.subtract(arcCamera.position).normalize();
+            cameraDirection.y = 0; // Keep movement horizontal
+            cameraDirection.normalize();
+            cameraRight = BABYLON.Vector3.Cross(cameraDirection, BABYLON.Vector3.Up());
+        } else {
+            // Default to world axes if camera is not available
+            cameraDirection = new BABYLON.Vector3(0, 0, 1);
+            cameraRight = new BABYLON.Vector3(1, 0, 0);
+        }
+        
+        return { forward: cameraDirection, right: cameraRight };
+    }
+
+    private clampToBoundaries(position: BABYLON.Vector3): BABYLON.Vector3 {
+        const clampedPosition = position.clone();
+        clampedPosition.y = -1;
+        
+        if (clampedPosition.x > BOUNDARY_LIMIT) clampedPosition.x = BOUNDARY_LIMIT;
+        else if (clampedPosition.x < -BOUNDARY_LIMIT) clampedPosition.x = -BOUNDARY_LIMIT;
+        if (clampedPosition.z > BOUNDARY_LIMIT) clampedPosition.z = BOUNDARY_LIMIT;
+        else if (clampedPosition.z < -BOUNDARY_LIMIT) clampedPosition.z = -BOUNDARY_LIMIT;
+        
+        return clampedPosition;
+    }
+
+    private updatePlayerPosition(newPosition: BABYLON.Vector3): void {
+        const clampedPosition = this.clampToBoundaries(newPosition);
+        this.playerNextPosition[this.room.sessionId] = clampedPosition;
+
+        // Send position update to server
+        this.room.send("updatePosition", {
+            x: clampedPosition.x,
+            y: clampedPosition.y,
+            z: clampedPosition.z,
+        });
+    }
+
     private gotoMenu() {
         this.scene.dispose();
         const menu = new Menu('renderCanvas');
@@ -595,45 +597,15 @@ export default class Game {
             if (this.isMobile && this.joystickActive && this.joystickOffset.length() > 0.1) {
                 const playerMesh = this.playerEntities[this.room.sessionId];
                 if (playerMesh) {
-                    const speed = 3;
-                    
                     // Get camera direction for movement relative to camera
-                    let cameraDirection = BABYLON.Vector3.Zero();
-                    let cameraRight = BABYLON.Vector3.Zero();
-                    
-                    if (this.camera && this.camera instanceof BABYLON.ArcRotateCamera) {
-                        const arcCamera = this.camera as BABYLON.ArcRotateCamera;
-                        cameraDirection = arcCamera.target.subtract(arcCamera.position).normalize();
-                        cameraDirection.y = 0;
-                        cameraDirection.normalize();
-                        cameraRight = BABYLON.Vector3.Cross(cameraDirection, BABYLON.Vector3.Up());
-                    } else {
-                        // Default movement direction
-                        cameraDirection = new BABYLON.Vector3(0, 0, 1);
-                        cameraRight = new BABYLON.Vector3(1, 0, 0);
-                    }
+                    const { forward: cameraDirection, right: cameraRight } = this.getCameraDirectionVectors();
 
                     // Calculate movement from joystick
-                    const movement = cameraDirection.scale(-this.joystickOffset.y * speed)
-                        .add(cameraRight.scale(this.joystickOffset.x * speed));
+                    const movement = cameraDirection.scale(-this.joystickOffset.y * JOYSTICK_SPEED)
+                        .add(cameraRight.scale(this.joystickOffset.x * JOYSTICK_SPEED));
                     
                     const newPosition = playerMesh.position.add(movement);
-                    newPosition.y = -1;
-
-                    // Clamp to boundaries
-                    if (newPosition.x > 245) newPosition.x = 245;
-                    else if (newPosition.x < -245) newPosition.x = -245;
-                    if (newPosition.z > 245) newPosition.z = 245;
-                    else if (newPosition.z < -245) newPosition.z = -245;
-
-                    this.playerNextPosition[this.room.sessionId] = newPosition;
-
-                    // Send position update to server
-                    this.room.send("updatePosition", {
-                        x: newPosition.x,
-                        y: newPosition.y,
-                        z: newPosition.z,
-                    });
+                    this.updatePlayerPosition(newPosition);
                 }
             }
         });
